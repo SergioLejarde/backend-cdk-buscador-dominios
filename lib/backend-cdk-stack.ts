@@ -26,7 +26,7 @@ export class BackendCdkStack extends Stack {
       ],
     });
 
-    // ⚠️ Paso nuevo: VPC endpoint para Secrets Manager
+    // ⚠️ Endpoint para que Lambda acceda a Secrets Manager desde subred privada (sin Internet)
     vpc.addInterfaceEndpoint('SecretsManagerEndpoint', {
       service: ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
       subnets: {
@@ -34,7 +34,7 @@ export class BackendCdkStack extends Stack {
       },
     });
 
-    // 2. Credenciales de la base de datos (guardadas en Secrets Manager)
+    // 2. Credenciales para la base de datos en Secrets Manager
     const dbSecret = new secretsmanager.Secret(this, 'DBSecret', {
       generateSecretString: {
         secretStringTemplate: JSON.stringify({ username: 'postgres' }),
@@ -45,7 +45,7 @@ export class BackendCdkStack extends Stack {
 
     const dbCredentials = rds.Credentials.fromSecret(dbSecret);
 
-    // 3. Instancia RDS PostgreSQL elegible para Free Tier
+    // 3. Instancia RDS PostgreSQL
     const dbInstance = new rds.DatabaseInstance(this, 'PostgresInstance', {
       engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_15 }),
       instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO),
@@ -67,6 +67,9 @@ export class BackendCdkStack extends Stack {
       handler: 'checkDomain.handler',
       code: lambda.Code.fromAsset(path.join(__dirname, 'lambda')),
       vpc,
+      vpcSubnets: {
+        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS, // ✅ aquí está el cambio
+      },
       environment: {
         SECRET_NAME: dbSecret.secretName,
       },
@@ -75,7 +78,7 @@ export class BackendCdkStack extends Stack {
     // 5. Permitir que la Lambda lea los secretos
     dbSecret.grantRead(lambdaFunction);
 
-    // 6. Permitir que la Lambda acceda al RDS
+    // 6. Permitir que la Lambda acceda a RDS
     dbInstance.connections.allowFrom(lambdaFunction, ec2.Port.tcp(5432));
   }
 }
